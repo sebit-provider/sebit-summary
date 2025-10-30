@@ -6,14 +6,14 @@ from typing import Dict, List
 from .schemas import (
     SummaryEntry,
     SummaryEntryResult,
-    SummaryRequest,
-    SummaryResponse,
+    SummaryReportRequest,
+    SummaryReportResponse,
     SummarySeriesAggregate,
     SummarySeriesHighlight,
 )
 
 
-def build_summary_report(payload: SummaryRequest) -> SummaryResponse:
+def build_summary_report(payload: SummaryReportRequest) -> SummaryReportResponse:
     entries: List[SummaryEntry] = payload.entries
     total_models = len(entries)
     overall_total = sum(entry.headline_amount for entry in entries)
@@ -59,12 +59,12 @@ def build_summary_report(payload: SummaryRequest) -> SummaryResponse:
             model=entry.model,
             headline_amount=round(entry.headline_amount, 2),
             currency=entry.currency,
-            details={key: round(value, 4) for key, value in entry.details.items()},
+            details=entry.details.model_dump(),
         )
         for entry in entries
     ]
 
-    return SummaryResponse(
+    return SummaryReportResponse(
         report_label=payload.report_label or "SEBIT Summary Report",
         as_of=payload.as_of,
         total_models=total_models,
