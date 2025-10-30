@@ -7,26 +7,21 @@ def test_summary_report():
     client = TestClient(create_app())
     payload = {
         "report_label": "Quarterly Consolidated",
-        "entries": [
+        "model_outputs": [
             {
-                "series": "Asset & Depreciation",
-                "model": "SEBIT-DDA",
-                "headline_amount": 5400.25,
-                "currency": "KRW",
-                "details": {
+                "model_name": "SEBIT-DDA",
+                "payload": {
                     "asset_label": "facility-line-1",
                     "schedule": [],
                     "total_depreciation": 233449.88,
                     "total_revaluation_gain_loss": 5400.25,
                     "total_unrecognised_revaluation": 250.0,
                 },
+                "currency": "KRW",
             },
             {
-                "series": "Insurance & Service Revenue",
-                "model": "SEBIT-PSRAS",
-                "headline_amount": 6154364210.48,
-                "currency": "KRW",
-                "details": {
+                "model_name": "SEBIT-PSRAS",
+                "payload": {
                     "portfolio_label": "insurance-cohort-1",
                     "assumed_revenue_recognition_rate": 0.4125,
                     "new_subscriber_average_payment": 263500.0,
@@ -36,6 +31,7 @@ def test_summary_report():
                     "pure_performance_break_even": 18250000.0,
                     "final_recognised_revenue": 6154364210.48,
                 },
+                "currency": "KRW",
             },
         ],
     }
@@ -46,3 +42,8 @@ def test_summary_report():
     assert data["report_label"] == "Quarterly Consolidated"
     assert data["total_models"] == 2
     assert data["overall_headline_total"] == 6154369610.73
+    first_entry = data["entries"][0]
+    assert first_entry["series"] == "Asset & Depreciation"
+    assert first_entry["model"] == "SEBIT-DDA"
+    assert first_entry["headline_amount"] == 5400.25
+    assert first_entry["details"]["total_depreciation"] == 233449.88

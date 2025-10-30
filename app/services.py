@@ -14,7 +14,7 @@ from .schemas import (
 
 
 def build_summary_report(payload: SummaryReportRequest) -> SummaryReportResponse:
-    entries: List[SummaryEntry] = payload.entries
+    entries: List[SummaryEntry] = payload.resolve_entries()
     total_models = len(entries)
     overall_total = sum(entry.headline_amount for entry in entries)
 

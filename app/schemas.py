@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Type, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # -----------------------------------------------------------------------------
@@ -188,9 +189,100 @@ ModelDetailUnion = Union[
 ]
 
 
-# -----------------------------------------------------------------------------
-# Summary entry & aggregate DTOs
-# -----------------------------------------------------------------------------
+@dataclass(frozen=True)
+class ModelRegistryEntry:
+    model: str
+    series: str
+    detail_model: Type[BaseModel]
+    headline_key: str
+
+
+MODEL_REGISTRY: Dict[str, ModelRegistryEntry] = {
+    "SEBIT-DDA": ModelRegistryEntry(
+        model="SEBIT-DDA",
+        series="Asset & Depreciation",
+        detail_model=DdaDetails,
+        headline_key="total_revaluation_gain_loss",
+    ),
+    "SEBIT-LAM": ModelRegistryEntry(
+        model="SEBIT-LAM",
+        series="Asset & Depreciation",
+        detail_model=LamDetails,
+        headline_key="total_revaluation_gain_loss",
+    ),
+    "SEBIT-RVM": ModelRegistryEntry(
+        model="SEBIT-RVM",
+        series="Asset & Depreciation",
+        detail_model=RvmDetails,
+        headline_key="final_revaluation_value",
+    ),
+    "SEBIT-CEEM": ModelRegistryEntry(
+        model="SEBIT-CEEM",
+        series="Expense & Profitability",
+        detail_model=CeemDetails,
+        headline_key="final_revaluation_value",
+    ),
+    "SEBIT-BDM": ModelRegistryEntry(
+        model="SEBIT-BDM",
+        series="Expense & Profitability",
+        detail_model=BdmDetails,
+        headline_key="final_book_value",
+    ),
+    "SEBIT-BELM": ModelRegistryEntry(
+        model="SEBIT-BELM",
+        series="Expense & Profitability",
+        detail_model=BelmDetails,
+        headline_key="final_bad_debt_ratio",
+    ),
+    "SEBIT-CPRM": ModelRegistryEntry(
+        model="SEBIT-CPRM",
+        series="Capital & Risk Derivatives",
+        detail_model=CprmDetails,
+        headline_key="final_convertible_bond_amount",
+    ),
+    "SEBIT-C-OCIM": ModelRegistryEntry(
+        model="SEBIT-C-OCIM",
+        series="Capital & Risk Derivatives",
+        detail_model=CocimDetails,
+        headline_key="final_adjusted_balance",
+    ),
+    "SEBIT-FAREX": ModelRegistryEntry(
+        model="SEBIT-FAREX",
+        series="Capital & Risk Derivatives",
+        detail_model=FarexDetails,
+        headline_key="revaluation_amount",
+    ),
+    "SEBIT-TCT-BEAM": ModelRegistryEntry(
+        model="SEBIT-TCT-BEAM",
+        series="Advanced Analytics",
+        detail_model=TctBeamDetails,
+        headline_key="cumulative_operating_profit",
+    ),
+    "SEBIT-CPMRV": ModelRegistryEntry(
+        model="SEBIT-CPMRV",
+        series="Advanced Analytics",
+        detail_model=CpmrvDetails,
+        headline_key="adjusted_crypto_value",
+    ),
+    "SEBIT-DCBPRA": ModelRegistryEntry(
+        model="SEBIT-DCBPRA",
+        series="Advanced Analytics",
+        detail_model=DcbpraDetails,
+        headline_key="adjusted_expected_return",
+    ),
+    "SEBIT-PSRAS": ModelRegistryEntry(
+        model="SEBIT-PSRAS",
+        series="Insurance & Service Revenue",
+        detail_model=PsrasDetails,
+        headline_key="final_recognised_revenue",
+    ),
+    "SEBIT-LSMRV": ModelRegistryEntry(
+        model="SEBIT-LSMRV",
+        series="Probability Revaluation",
+        detail_model=LsmrvDetails,
+        headline_key="final_adjustment_amount",
+    ),
+}
 
 
 class SummaryEntry(BaseModel):
@@ -208,6 +300,27 @@ class SummaryEntry(BaseModel):
         ...,
         description="Structured detail payload for the given SEBIT model.",
     )
+
+    @classmethod
+    def from_model_output(cls, model_name: str, data: Dict[str, Any], currency: Optional[str] = None) -> "SummaryEntry":
+        entry = MODEL_REGISTRY.get(model_name)
+        if entry is None:
+            raise ValueError(f"Model '{model_name}' is not registered for summary aggregation.")
+
+        detail_instance = entry.detail_model(**data)
+        headline_value = data.get(entry.headline_key)
+        if headline_value is None:
+            raise ValueError(
+                f"Model '{model_name}' output missing headline key '{entry.headline_key}'."
+            )
+
+        return cls(
+            series=entry.series,
+            model=entry.model,
+            headline_amount=float(headline_value),
+            currency=currency,
+            details=detail_instance,
+        )
 
 
 class SummarySeriesHighlight(BaseModel):
@@ -234,6 +347,34 @@ class SummaryEntryResult(BaseModel):
     details: Dict[str, Any]
 
 
+class SummaryModelOutput(BaseModel):
+    model_name: str = Field(..., description="Registered SEBIT model identifier (e.g., SEBIT-DDA).")
+    payload: Dict[str, Any] = Field(
+        ...,
+        description="Raw output returned by the SEBIT model endpoint.",
+    )
+    currency: Optional[str] = Field(
+        default=None,
+        description="Optional override for the headline currency code.",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "model_name": "SEBIT-DDA",
+                "payload": {
+                    "asset_label": "facility-line-1",
+                    "schedule": [],
+                    "total_depreciation": 233449.88,
+                    "total_revaluation_gain_loss": 5400.25,
+                    "total_unrecognised_revaluation": 250.0,
+                },
+                "currency": "KRW",
+            }
+        }
+    }
+
+
 class SummaryReportRequest(BaseModel):
     report_label: Optional[str] = Field(
         default="SEBIT Summary Report",
@@ -243,37 +384,51 @@ class SummaryReportRequest(BaseModel):
         default=None,
         description="Timestamp representing when the figures were captured.",
     )
-    entries: List[SummaryEntry] = Field(
-        ...,
-        min_length=1,
-        description="List of SEBIT model outputs to summarise.",
+    entries: Optional[List[SummaryEntry]] = Field(
+        default=None,
+        description="Pre-built summary entries (optional when model_outputs is provided).",
     )
+    model_outputs: Optional[List[SummaryModelOutput]] = Field(
+        default=None,
+        min_length=1,
+        description="Raw SEBIT model outputs that will be converted into entries automatically.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_sources(self) -> "SummaryReportRequest":
+        if not self.entries and not self.model_outputs:
+            raise ValueError("Either 'entries' or 'model_outputs' must be provided.")
+        return self
+
+    def resolve_entries(self) -> List[SummaryEntry]:
+        if self.entries:
+            return self.entries
+        assert self.model_outputs, "model_outputs should be available when entries is None"
+        return [
+            SummaryEntry.from_model_output(item.model_name, item.payload, currency=item.currency)
+            for item in self.model_outputs
+        ]
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "report_label": "October Portfolio Update",
                 "as_of": "2025-10-30T09:40:15.788Z",
-                "entries": [
+                "model_outputs": [
                     {
-                        "series": "Asset & Depreciation",
-                        "model": "SEBIT-DDA",
-                        "headline_amount": 5400.25,
-                        "currency": "KRW",
-                        "details": {
+                        "model_name": "SEBIT-DDA",
+                        "payload": {
                             "asset_label": "facility-line-1",
                             "schedule": [],
                             "total_depreciation": 233449.88,
                             "total_revaluation_gain_loss": 5400.25,
                             "total_unrecognised_revaluation": 250.0,
                         },
+                        "currency": "KRW",
                     },
                     {
-                        "series": "Insurance & Service Revenue",
-                        "model": "SEBIT-PSRAS",
-                        "headline_amount": 6154364210.48,
-                        "currency": "KRW",
-                        "details": {
+                        "model_name": "SEBIT-PSRAS",
+                        "payload": {
                             "portfolio_label": "insurance-cohort-1",
                             "assumed_revenue_recognition_rate": 0.4125,
                             "new_subscriber_average_payment": 263500.0,
@@ -283,6 +438,7 @@ class SummaryReportRequest(BaseModel):
                             "pure_performance_break_even": 18250000.0,
                             "final_recognised_revenue": 6154364210.48,
                         },
+                        "currency": "KRW",
                     },
                 ],
             }
